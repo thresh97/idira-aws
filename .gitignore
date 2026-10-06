@@ -1,0 +1,7 @@
+.venv/
+__pycache__/
+*.pyc
+aws-cli.log
+config.log
+.claude/settings.local.json
+.DS_Store

@@ -1,0 +1,83 @@
+--- a/core/auth.py
++++ b/core/auth.py
+@@ -65,6 +65,17 @@
+     tenant_resp = AuthResponse(response, endpoint)
+     return tenant_resp
+     
++def mech_label(mechanism):
++    return str(mechanism.get('PromptSelectMech') or mechanism.get('Name') or mechanism.get('AnswerType'))
++
++def show_oob_number(authresp):
++    try:
++        number = authresp.json()['Result'].get('GeneratedAuthValue')
++    except (ValueError, KeyError, AttributeError):
++        return
++    if number:
++        print("\n>>> Select this number on your phone: " + str(number) + "\n")
++
+ def advance_authentication(tenant_response, endpoint, username, version, proxy, environment):
+     certpath = environment.get_certpath()
+     method = "/Security/AdvanceAuthentication"
+@@ -78,20 +89,18 @@
+         logging.info("There are " + str(total_mechanism) + " mechanisms")
+         
+         if (total_mechanism > 1):
++            mechanisms = challenge['Mechanisms']
+             again = True
+             while(again):
+-                for key, value in challenge.items():
+-                    count = 1
+-                    for mechanism in value:
+-                        print(str(count) + " : " + mechanism['PromptSelectMech'])
+-                        count = count + 1
+-                    choice = input("Please choose the mechanism : ")
++                for count, mech in enumerate(mechanisms, 1):
++                    print(str(count) + " : " + mech_label(mech))
++                choice = input("Please choose the mechanism : ")
+                 try:
+-                    if (int(choice) >= count or int(choice) <= 0):
++                    if (int(choice) > len(mechanisms) or int(choice) <= 0):
+                         continue
+                 except ValueError:
+                     continue
+-                mechanism = value[int(choice)-1]
++                mechanism = mechanisms[int(choice)-1]
+                 again = False
+         else:
+             mechanism = challenge['Mechanisms'][0]
+@@ -117,7 +126,7 @@
+     if (mechanism['Name'] == 'OATH'):
+         choice = '1'
+     if (choice == '1'):
+-        passwd = getpass(mechanism['PromptSelectMech'] + " : ")
++        passwd = getpass(mech_label(mechanism) + " : ")
+         request = AdvAuthRequest(tenant_id, session_id, mechanism_id, passwd)
+         json_req = request.get_adv_auth_json_passwd()
+         authresp = call_rest_post(endpoint, method, json_req, headers, certpath, proxy, environment.get_debug())
+@@ -151,7 +160,7 @@
+     mechanism_id = mechanism['MechanismId']
+     session_id = tenant_response.get_sessionid()
+     tenant_id = tenant_response.get_tenantid()
+-    passwd = getpass(mechanism['PromptSelectMech'] + " : ")
++    passwd = getpass(mech_label(mechanism) + " : ")
+     request = AdvAuthRequest(tenant_id, session_id, mechanism_id, passwd)
+     json_req = request.get_adv_auth_json_passwd()
+     headers = {}
+@@ -181,6 +190,7 @@
+     headers = {}
+     authresp = call_rest_post(endpoint, method, json_req, headers, certpath, proxy, environment.get_debug())
+     logging.info("The response is StartOob req" + authresp.text)
++    show_oob_number(authresp)
+     handle_unix(mechanism, tenant_response, username, endpoint, method, environment, proxy, request, json_req)
+ 
+ def advance_auth_for_mech(mechanism, tenant_response, username, endpoint, method, proxy, environment):
+@@ -208,7 +218,8 @@
+         json_req = request.get_adv_auth_json_startoob()
+         headers = {}
+         authresp = call_rest_post(endpoint, method, json_req, headers, certpath, proxy, environment.get_debug())
+-        print(mechanism['PromptSelectMech'] + " Waiting ......")
++        show_oob_number(authresp)
++        print(mech_label(mechanism) + " Waiting ......")
+         json_req = request.get_adv_auth_json_poll()
+         while (True):
+             sys.stdout.write(".")
