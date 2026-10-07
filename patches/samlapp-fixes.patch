@@ -1,0 +1,14 @@
+--- a/core/samlapp.py
++++ b/core/samlapp.py
+@@ -82,6 +82,11 @@
+         allroles.append(chunks[0]) 
+         saml_provider.append(chunks[1])
+     
++    if not allroles:
++        print('No IAM roles found in this app\'s SAML assertion.')
++        print('This is likely an IAM Identity Center app — use "aws configure sso" for it instead.')
++        return 'q', None
++
+     printline()
+     print(Fore.GREEN)
+     print("Select a role to login. Choose one role at a time. This")

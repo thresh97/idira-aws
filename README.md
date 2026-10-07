@@ -42,7 +42,7 @@ Not sure of the role name? Run the tool once with any `--role`, read the ARN lis
 
 1. Enter your short username (not the email/UPN), then your password.
 2. Pick **Mobile Authenticator** and tap the number printed as `>>> Select this number on your phone: NN`. Security-key mechanisms (FIDO2/U2F) are not supported by this tool.
-3. Pick the **IAM SAML** AWS app. An app whose assertion has no IAM roles (typically an Identity Center app) crashes with `IndexError: list index out of range`; just pick a different app.
+3. Pick the **IAM SAML** AWS app. An app whose assertion has no IAM roles (typically an Identity Center app) prints an error and returns you to the app menu; just pick a different app.
 4. Pick your role. The tool re-prompts after each success; enter `q` to exit.
 
 `awslogin` then runs `aws sts get-caller-identity` and, if that succeeds, exports `AWS_PROFILE=<role-name>_profile` in your shell. Credentials last one hour; run `awslogin` again to refresh.
@@ -100,7 +100,8 @@ Terraform's AWS provider picks up `AWS_PROFILE` (or `profile = "..."` in the pro
 | Path | Purpose |
 |---|---|
 | `aws-cli-utilities-master.zip` | CyberArk's original, unmodified `aws-cli-utilities` (Apache-2.0, see `LICENSE.md` inside). Docs: https://identity-developer.cyberark.com/docs/aws-cli |
-| `patches/auth-py-fixes.patch` | Fixes for `core/auth.py` against current CyberArk responses (see below). Only `auth.py` differs from the original. |
+| `patches/auth-py-fixes.patch` | Fixes for `core/auth.py` against current CyberArk responses (see below). |
+| `patches/samlapp-fixes.patch` | Graceful error for Identity Center apps that have no IAM roles in their SAML assertion (instead of crashing). |
 | `awslogin.zsh` | Template for the `awslogin` shell function; `install.sh` fills in the placeholders. |
 | `install.sh` | Extracts the zip, applies the patch, creates a venv with `boto3 requests colorama`, writes `awslogin.zsh`. Safe to re-run. |
 | `AGENTS.md` | Guidance for AI coding agents working in this repo. |
@@ -119,6 +120,7 @@ DEST="$HOME/.local/share/cyberark-aws-cli"
 unzip -q aws-cli-utilities-master.zip "aws-cli-utilities-master/AWS CLI - Idaptive V1/*" -d /tmp/cyberark-aws
 mkdir -p "$DEST" && cp -R "/tmp/cyberark-aws/aws-cli-utilities-master/AWS CLI - Idaptive V1/." "$DEST/"
 patch -p1 -d "$DEST" < patches/auth-py-fixes.patch
+patch -p1 -d "$DEST" < patches/samlapp-fixes.patch
 python3 -m venv "$DEST/.venv" && "$DEST/.venv/bin/pip" install boto3 requests colorama
 ```
 
@@ -131,7 +133,7 @@ Then copy `awslogin.zsh` to `$DEST/`, replace `<tenant>`, `<region>` and `<role-
 | `KeyError: 'PromptSelectMech'` | Unpatched `auth.py`. Re-run `install.sh`. |
 | MFA hangs on "Waiting for completing authentication mechanism" | You chose a security-key option. Ctrl-C, re-run, pick Mobile Authenticator. |
 | No number shown for Mobile Authenticator | Unpatched `auth.py`. Re-run `install.sh`. |
-| `IndexError: list index out of range` at role selection | That app has no IAM roles in its assertion (likely Identity Center). Pick another app. |
+| "No IAM roles found in this app's SAML assertion" | That app is likely an Identity Center app. The tool returns you to the app menu — pick a different one. |
 | `Access Denied` from `AssumeRoleWithSAML` | The role isn't trusted for your SAML provider or you picked the wrong role. Check the ARN list. |
 | `aws: [ERROR]: The config profile (...) could not be found` right after a failed login | Harmless. The tool exits 0 on failure, so the follow-up check ran anyway. |
 | Expired credentials | They last one hour. Run `awslogin` again. |
