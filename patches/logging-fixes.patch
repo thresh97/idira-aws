@@ -1,0 +1,151 @@
+--- a/AWSCLI.py	2026-10-06 21:00:36
++++ b/AWSCLI.py	2026-10-06 21:06:33
+@@ -17,6 +17,7 @@
+ from core import samlapp
+ from aws import assumerolesaml
+ import logging
++import os
+ from config import readconfig
+ from core import uprest
+ import re
+@@ -45,8 +46,15 @@
+     session = auth.interactive_login(user, version, proxy, environment)
+     return session, user
+ 
++class _SecureFileHandler(logging.FileHandler):
++    def _open(self):
++        return open(self.baseFilename, self.mode, encoding=self.encoding,
++                    opener=lambda p, f: os.open(p, f, 0o600))
++
+ def set_logging():
+-    logging.basicConfig(handlers=[logging.FileHandler('aws-cli.log', 'w', 'utf-8')], level=logging.INFO, format='%(asctime)s %(filename)s %(funcName)s %(lineno)d %(message)s')
++    handler = _SecureFileHandler('aws-cli.log', 'w', 'utf-8')
++    logging.basicConfig(handlers=[handler], level=logging.INFO,
++                        format='%(asctime)s %(filename)s %(funcName)s %(lineno)d %(message)s')
+     logging.info('Starting App..')
+     print("Logfile - aws-cli.log")
+     
+@@ -89,9 +97,9 @@
+     
+     response = uprest.get_applications(user, session, environment, proxy)
+     result = response["Result"]
+-    logging.info("Result " + str(result))
++    logging.debug("Result " + str(result))
+     apps = result["Apps"]
+-    logging.info("Apps : " + str(apps))
++    logging.debug("Apps : " + str(apps))
+     length = len(apps)
+     awsapps = []
+     for j in range (0, length):
+@@ -99,12 +107,12 @@
+             appinfo = {}
+             if (("AWS" in apps[j]["TemplateName"] or "Amazon" in apps[j]["TemplateName"]) and apps[j]["WebAppType"] != 'UsernamePassword'):
+                 appinfo = apps[j]
+-                logging.info(appinfo)
++                logging.debug(appinfo)
+                 awsapps.append(appinfo)
+         except KeyError:
+             continue
+ 
+-    logging.info("AWSapps : " + str(awsapps))
++    logging.debug("AWSapps : " + str(awsapps))
+     
+     if (len(awsapps) == 0):
+         print("No AWS Applications to select for the user " + user)
+@@ -120,7 +128,7 @@
+         if (re.match(pattern, number)):
+             print("Exiting..")
+             break
+-        if (int(number) - 1 >= len(awsapps)):
++        if int(number) <= 0 or int(number) - 1 >= len(awsapps):
+             continue
+         
+         appkey = awsapps[int(number)-1]['AppKey']
+@@ -143,17 +151,19 @@
+ 
+     logging.info("Done")
+     logging.shutdown()
++    if sum(profilecount) == 0:
++        sys.exit(1)
+ 
+-try:    
++try:
+     client_main()
+-except SystemExit as se:
+-    print("Program Exited..")
+-    exc_type, exc_value, exc_traceback = sys.exc_info()
++except SystemExit:
++    raise
+ except:
+     print("Program Exited due to some error..")
+     logging.exception("Program Exited..")
+     exc_type, exc_value, exc_traceback = sys.exc_info()
+     traceback.print_exception(exc_type, exc_value, exc_traceback)
++    sys.exit(1)
+ finally:
+     logging.shutdown()
+ 
+--- a/core/restclient.py	2026-10-06 21:00:36
++++ b/core/restclient.py	2026-10-06 21:06:27
+@@ -28,9 +28,9 @@
+ 
+     headers['User-Agent'] = "CyberArkIdentity-AWS-Cli"
+ 
+-    logging.info("Calling " + endpoint + " with headers : " + str(headers))
++    logging.debug("Calling " + endpoint + " with headers : " + str(headers))
+     if (debug):
+-        logging.info("Request : " + str(body))
++        logging.debug("Request : " + str(body))
+     
+     try :
+         response = requests.post(endpoint, headers=headers, verify=certpath, proxies=proxy, data=body)
+@@ -40,7 +40,7 @@
+         print(Style.RESET_ALL)
+         sys.exit(0)
+     
+-    logging.info("Received Response : " + response.text)
++    logging.debug("Received Response : " + response.text)
+     return response
+ 
+ #Following method is not used currently. It will be used if redirects are needed.
+@@ -52,10 +52,10 @@
+     if 'cache-control' not in headers:
+         headers['cache-control'] = "no-cache"
+     endpoint = endpoint+method
+-    logging.info("Calling " + endpoint)
+-    logging.info("Method : " + method + " Request Body : " + str(body) + " Headers : " + str(headers) + " Proxy : " + str(proxy))
+-    logging.info("Calling " + endpoint + " with headers : " + str(headers) + " and data : " + str(body))
++    logging.debug("Calling " + endpoint)
++    logging.debug("Method : " + method + " Request Body : " + str(body) + " Headers : " + str(headers) + " Proxy : " + str(proxy))
++    logging.debug("Calling " + endpoint + " with headers : " + str(headers) + " and data : " + str(body))
+     response = requests.post(endpoint, headers=headers, verify=certpath, proxies=proxy, data=body)
+-    logging.info("Received Response : " + response.text)
++    logging.debug("Received Response : " + response.text)
+     return response
+     
+\ No newline at end of file
+--- a/core/authresponse.py	2026-10-06 21:00:36
++++ b/core/authresponse.py	2026-10-06 21:06:27
+@@ -23,9 +23,9 @@
+         self.response = response
+         self.tenant_url = tenant_url
+         json_resp = json.loads(self.response.text)
+-        logging.info('------ Json Response from the REST call ---------')
+-        logging.info(json_resp)
+-        logging.info('--------------------------------------------------')
++        logging.debug('------ Json Response from the REST call ---------')
++        logging.debug(json_resp)
++        logging.debug('--------------------------------------------------')
+         
+                 
+     def get_success_result(self):
+--- a/core/uprest.py	2026-10-06 21:00:36
++++ b/core/uprest.py	2026-10-06 21:06:27
+@@ -24,6 +24,6 @@
+     session_token = "Bearer "+session.session_token
+     headers['Authorization'] = session_token
+     response = restclient.call_rest_post(session.endpoint, method, body, headers, environment.get_certpath(), proxy,environment.get_debug())
+-    logging.info(response.text)
++    logging.debug(response.text)
+     return response.json()
+ 

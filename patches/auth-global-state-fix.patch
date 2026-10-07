@@ -1,0 +1,63 @@
+--- a/core/auth.py	2026-10-06 21:00:36
++++ b/core/auth.py	2026-10-06 21:01:47
+@@ -32,9 +32,6 @@
+ from colorama import Fore, Back, Style
+ 
+ 
+-result = []
+-done = False
+-
+ def start_authentication(username, version, proxy, environment):
+     endpoint = environment.get_endpoint()
+     certpath = environment.get_certpath()
+@@ -150,11 +147,9 @@
+                 break
+             if (success_result != True):
+                 break
+-    result.append(authresp)
+-    result.append(success_result)
+-    result.append(summary)
+-        
++    return authresp, success_result, summary
+ 
++
+ def handle_text(mechanism, tenant_response, username, endpoint, method, proxy, environment):
+     certpath = environment.get_certpath()
+     mechanism_id = mechanism['MechanismId']
+@@ -173,10 +168,7 @@
+     if (success_result == False):
+         print("Wrong Credentials.. Exiting..")
+         sys.exit()
+-    global result
+-    result.append(authresp)
+-    result.append(success_result)
+-    result.append(summary)
++    return authresp, success_result, summary
+ 
+             
+ def handle_text_oob(mechanism, tenant_response, username, endpoint, method, proxy, environment):
+@@ -191,7 +183,7 @@
+     authresp = call_rest_post(endpoint, method, json_req, headers, certpath, proxy, environment.get_debug())
+     logging.info("The response is StartOob req" + authresp.text)
+     show_oob_number(authresp)
+-    handle_unix(mechanism, tenant_response, username, endpoint, method, environment, proxy, request, json_req)
++    return handle_unix(mechanism, tenant_response, username, endpoint, method, environment, proxy, request, json_req)
+ 
+ def advance_auth_for_mech(mechanism, tenant_response, username, endpoint, method, proxy, environment):
+     certpath = environment.get_certpath()
+@@ -201,13 +193,9 @@
+     logging.info("The AnswerType is : " + mechanism['AnswerType'])
+     if (mechanism['AnswerType'] == "Text" or mechanism['AnswerType'] == "StartTextOob"):
+         if (mechanism['AnswerType'] == 'Text'):
+-            handle_text(mechanism, tenant_response, username, endpoint, method, proxy, environment)
++            authresp, success_result, summary = handle_text(mechanism, tenant_response, username, endpoint, method, proxy, environment)
+         if (mechanism['AnswerType'] == "StartTextOob"):
+-            handle_text_oob(mechanism, tenant_response, username, endpoint, method, proxy, environment)
+-        authresp = result[0]
+-        success_result = result[1]
+-        summary = result[2]
+-        del result[:]
++            authresp, success_result, summary = handle_text_oob(mechanism, tenant_response, username, endpoint, method, proxy, environment)
+         if (success_result == False):
+             logging.info("Authentication is not successful..")
+             print("Authentication is not successful..")

@@ -38,6 +38,42 @@ Then open a new terminal and run `awslogin`.
 
 Not sure of the role name? Run the tool once with any `--role`, read the ARN list at the role prompt, then re-run `install.sh` with the right name, or set `AWSLOGIN_PROFILE` later.
 
+## How it works
+
+```mermaid
+flowchart TD
+    START([awslogin]) --> LOG["Print: Logfile - aws-cli.log"]
+    LOG --> UN["Prompt: username"]
+    UN --> PW["Prompt: password"]
+    PW --> AUTH[Authenticate to CyberArk]
+    AUTH --> MECHS["Print: mechanism list\n1 · Mobile Authenticator\n2 · FIDO2 Security Key\n3 · U2FONDEVICE"]
+    MECHS --> MSEL["Prompt: Please choose the mechanism"]
+    MSEL --> NUM["Print: Select this number on your phone: NN"]
+    NUM --> WAIT["Print: Waiting for completing\nauthentication mechanism.."]
+    WAIT --> TAP[User approves on phone]
+    TAP --> APPHEAD["Print: Select the aws app to login.\nType 'quit' or 'q' to exit"]
+    APPHEAD --> APPL[Print: numbered app list]
+    APPL --> ANUM["Prompt: Enter Number"]
+    ANUM --> AQ{q?}
+    AQ -- yes --> EXIT["Print: Exiting.."]
+    AQ -- no --> CALL["Print: Calling app with key: uuid\nFetch SAML assertion"]
+    CALL --> HASROLES{IAM roles in\nassertion?}
+    HASROLES -- no --> NOIAM["Print: No IAM roles found in\nthis app's SAML assertion"]
+    NOIAM --> APPHEAD
+    HASROLES -- yes --> ROLEM[Print: numbered role ARN list]
+    ROLEM --> RSEL["Prompt: Please select"]
+    RSEL --> RQ{q?}
+    RQ -- yes --> APPHEAD
+    RQ -- no --> STS["POST AssumeRoleWithSAML to AWS STS\nWrite credentials to ~/.aws/credentials"]
+    STS --> PCREATED["Print: Your profile is created\nIt will expire at ..."]
+    PCREATED --> RSEL
+    EXIT --> GCI["aws sts get-caller-identity --profile role_profile"]
+    GCI --> OK{Credentials\nin profile?}
+    OK -- yes --> JSON[Print: caller identity JSON]
+    JSON --> EXP([export AWS_PROFILE=role_profile])
+    OK -- no --> NOPROF(["Print: config profile could not be found\nAWS_PROFILE not set"])
+```
+
 ## Using awslogin
 
 1. Enter your short username (not the email/UPN), then your password.

@@ -1,0 +1,11 @@
+--- a/core/samlapp.py	2026-10-06 21:00:36
++++ b/core/samlapp.py	2026-10-06 21:01:54
+@@ -107,7 +107,7 @@
+             selection = int (inputstring)
+         except ValueError:
+             return 'q', None
+-        if (selection > len(allroles)):
++        if selection <= 0 or selection > len(allroles):
+             print('You have selected a wrong role..')
+             sys.exit(0)
+     else:

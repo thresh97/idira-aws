@@ -7,6 +7,9 @@ REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ZIP="$REPO_DIR/aws-cli-utilities-master.zip"
 PATCH_FILE="$REPO_DIR/patches/auth-py-fixes.patch"
 SAMLAPP_PATCH="$REPO_DIR/patches/samlapp-fixes.patch"
+LOGGING_PATCH="$REPO_DIR/patches/logging-fixes.patch"
+AUTH_STATE_PATCH="$REPO_DIR/patches/auth-global-state-fix.patch"
+SAMLAPP_BOUNDS_PATCH="$REPO_DIR/patches/samlapp-bounds-fix.patch"
 TEMPLATE="$REPO_DIR/awslogin.zsh"
 TOOL_SUBDIR="aws-cli-utilities-master/AWS CLI - Idaptive V1"
 
@@ -56,7 +59,7 @@ for cmd in python3 unzip patch sed; do
 done
 python3 -c 'import venv' 2>/dev/null || die "python3 venv module is missing"
 command -v aws >/dev/null || echo "warning: AWS CLI ('aws') not found; install it, awslogin uses it to verify credentials" >&2
-[ -f "$ZIP" ] && [ -f "$PATCH_FILE" ] && [ -f "$SAMLAPP_PATCH" ] && [ -f "$TEMPLATE" ] || die "run from the repo checkout (zip, patches/ and awslogin.zsh must exist)"
+[ -f "$ZIP" ] && [ -f "$PATCH_FILE" ] && [ -f "$SAMLAPP_PATCH" ] && [ -f "$LOGGING_PATCH" ] && [ -f "$AUTH_STATE_PATCH" ] && [ -f "$SAMLAPP_BOUNDS_PATCH" ] && [ -f "$TEMPLATE" ] || die "run from the repo checkout (zip, patches/ and awslogin.zsh must exist)"
 
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
@@ -69,6 +72,9 @@ cp -R "$TMP/$TOOL_SUBDIR/." "$DEST/"
 echo "==> Applying patch"
 patch -p1 -s -d "$DEST" < "$PATCH_FILE"
 patch -p1 -s -d "$DEST" < "$SAMLAPP_PATCH"
+patch -p1 -s -d "$DEST" < "$LOGGING_PATCH"
+patch -p1 -s -d "$DEST" < "$AUTH_STATE_PATCH"
+patch -p1 -s -d "$DEST" < "$SAMLAPP_BOUNDS_PATCH"
 
 echo "==> Creating virtualenv and installing dependencies"
 [ -x "$DEST/.venv/bin/python" ] || python3 -m venv "$DEST/.venv"
