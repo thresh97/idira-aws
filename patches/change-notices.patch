@@ -1,0 +1,71 @@
+--- a/AWSCLI.py
++++ b/AWSCLI.py
+@@ -11,6 +11,9 @@
+ # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ # See the License for the specific language governing permissions and
+ # limitations under the License.
++#
++# NOTICE: This file was modified from the original CyberArk version. Changes: failure to create any profile exits non-zero, the app-number bounds check is stricter, and the log file is created with owner-only permissions and no longer records app and SAML details at INFO level.
++# See the patches/ directory and NOTICE.md in the idira-aws repository.
+ 
+ #Version 8.1
+ from core import auth
+--- a/core/restclient.py
++++ b/core/restclient.py
+@@ -11,6 +11,9 @@
+ # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ # See the License for the specific language governing permissions and
+ # limitations under the License.
++#
++# NOTICE: This file was modified from the original CyberArk version. Changes: log output reduced so it does not record sensitive request details at INFO level.
++# See the patches/ directory and NOTICE.md in the idira-aws repository.
+ 
+ import requests
+ import logging
+--- a/core/authresponse.py
++++ b/core/authresponse.py
+@@ -11,6 +11,9 @@
+ # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ # See the License for the specific language governing permissions and
+ # limitations under the License.
++#
++# NOTICE: This file was modified from the original CyberArk version. Changes: log output reduced so it does not record sensitive response details at INFO level.
++# See the patches/ directory and NOTICE.md in the idira-aws repository.
+ 
+ import json
+ import logging
+--- a/core/uprest.py
++++ b/core/uprest.py
+@@ -11,6 +11,9 @@
+ # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ # See the License for the specific language governing permissions and
+ # limitations under the License.
++#
++# NOTICE: This file was modified from the original CyberArk version. Changes: log output reduced so it does not record application details at INFO level.
++# See the patches/ directory and NOTICE.md in the idira-aws repository.
+ 
+ import json
+ from core import restclient
+--- a/core/samlapp.py
++++ b/core/samlapp.py
+@@ -11,6 +11,9 @@
+ # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ # See the License for the specific language governing permissions and
+ # limitations under the License.
++#
++# NOTICE: This file was modified from the original CyberArk version. Changes: an app whose SAML assertion has no IAM roles prints a message instead of crashing, and the role-number bounds check is stricter.
++# See the patches/ directory and NOTICE.md in the idira-aws repository.
+ 
+ from core import restclient, auth
+ from core.htmlresponse import HtmlResponse
+--- a/core/auth.py
++++ b/core/auth.py
+@@ -13,7 +13,7 @@
+ # limitations under the License.
+ #
+ # NOTICE: This file was modified from the original CyberArk version. Changes: the MFA menu tolerates
+-# mechanisms without PromptSelectMech, and the Mobile Authenticator number-match value is printed.
++# mechanisms without PromptSelectMech, and the Mobile Authenticator number-match value is printed, and authentication results are returned instead of kept in module-level state.
+ # See patches/auth-py-fixes.patch and NOTICE.md in the idira-aws repository.
+ 
+ from core.restclient import call_rest_post

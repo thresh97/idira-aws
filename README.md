@@ -1,12 +1,14 @@
 # AWS CLI / Terraform credentials on macOS via CyberArk Identity (SAML)
 
+> **Unsupported community example.** This is a learning and testing aid, provided as-is with no warranty, SLA or support. It is not an official or supported product, tool or reference architecture of any company, including any employer of its contributors, and it is not affiliated with CyberArk or AWS. Review the code before you run it, and use it at your own risk. Issues and pull requests may go unanswered.
+
 Get temporary AWS STS credentials into a named profile so plain `aws` and `terraform` work locally when AWS access is federated through a CyberArk Identity (Idira/Idaptive) app tile.
 
 This applies when clicking the AWS tile lands on `https://signin.aws.amazon.com/saml` (plain IAM SAML federation). If you land on an IAM Identity Center portal instead, use `aws configure sso`; none of this applies.
 
 ## Quick start
 
-Requirements: macOS with zsh, Python 3 (with `venv`), `unzip`, `patch`, and the [AWS CLI](https://aws.amazon.com/cli/).
+Requirements: macOS with zsh (Linux, including WSL, should work but is untested, see [Future work](#future-work--todo)), Python 3 (with `venv`), `unzip`, `patch`, and the [AWS CLI](https://aws.amazon.com/cli/).
 
 ```bash
 ./install.sh --tenant <tenant> --region <aws-region> --role <role-name> --zshrc
@@ -46,7 +48,7 @@ flowchart TD
     LOG --> UN["Prompt: username"]
     UN --> PW["Prompt: password"]
     PW --> AUTH[Authenticate to CyberArk]
-    AUTH --> MECHS["Print: mechanism list\n1 · Mobile Authenticator\n2 · FIDO2 Security Key\n3 · U2FONDEVICE"]
+    AUTH --> MECHS["Print: mechanism list\n1 · Mobile Authenticator\n2 · other methods (unsupported)"]
     MECHS --> MSEL["Prompt: Please choose the mechanism"]
     MSEL --> NUM["Print: Select this number on your phone: NN"]
     NUM --> WAIT["Print: Waiting for completing\nauthentication mechanism.."]
@@ -77,7 +79,7 @@ flowchart TD
 ## Using awslogin
 
 1. Enter your short username (not the email/UPN), then your password.
-2. Pick **Mobile Authenticator** and tap the number printed as `>>> Select this number on your phone: NN`. Security-key mechanisms (FIDO2/U2F) are not supported by this tool.
+2. Pick **Mobile Authenticator** and tap the number printed as `>>> Select this number on your phone: NN`. Other MFA methods are not supported by this tool.
 3. Pick the **IAM SAML** AWS app. An app whose assertion has no IAM roles (typically an Identity Center app) prints an error and returns you to the app menu; just pick a different app.
 4. Pick your role. The tool re-prompts after each success; enter `q` to exit.
 
@@ -91,8 +93,7 @@ Logfile - aws-cli.log
 Please enter your username : jdoe
 Password :
 1 : Mobile Authenticator
-2 : FIDO2 Security Key
-3 : U2FONDEVICE
+2 : <other method>
 Please choose the mechanism : 1
 
 >>> Select this number on your phone: 42
@@ -138,15 +139,21 @@ Terraform's AWS provider picks up `AWS_PROFILE` (or `profile = "..."` in the pro
 | `aws-cli-utilities-master.zip` | CyberArk's original, unmodified `aws-cli-utilities` (Apache-2.0, see `LICENSE.md` inside). Docs: https://identity-developer.cyberark.com/docs/aws-cli |
 | `patches/auth-py-fixes.patch` | Fixes for `core/auth.py` against current CyberArk responses (see below). |
 | `patches/samlapp-fixes.patch` | Graceful error for Identity Center apps that have no IAM roles in their SAML assertion (instead of crashing). |
+| `patches/samlapp-bounds-fix.patch` | Rejects a role number of zero or below instead of indexing from the end of the list. |
+| `patches/auth-global-state-fix.patch` | Returns authentication results from the handlers instead of keeping them in module-level lists. |
+| `patches/logging-fixes.patch` | Creates `aws-cli.log` with owner-only permissions, moves request/response/app details from INFO to DEBUG, tightens the app-number check, and exits non-zero when no profile was created. |
+| `patches/change-notices.patch` | Adds the Apache-2.0 change notice to every upstream file the other patches modify. Apply last. |
 | `awslogin.zsh` | Template for the `awslogin` shell function; `install.sh` fills in the placeholders. |
-| `install.sh` | Extracts the zip, applies the patch, creates a venv with `boto3 requests colorama`, writes `awslogin.zsh`. Safe to re-run. |
+| `install.sh` | Extracts the zip, applies the patches in order, creates a venv with `boto3 requests colorama`, writes `awslogin.zsh`. Safe to re-run. |
 | `AGENTS.md` | Guidance for AI coding agents working in this repo. |
+| `LICENSE` | MIT license for the original files in this repo (not the bundled CyberArk code). |
+| `NOTICE.md` | Third-party attribution (CyberArk, Apache-2.0), statement of modifications, trademark/affiliation disclaimer. |
 
-### The patch
+### The patches
 
-The 2022 code breaks against the current API in two ways:
+`auth-py-fixes.patch` is the core fix. The 2022 code breaks against the current API in two ways:
 
-1. **MFA menu crash (`KeyError: 'PromptSelectMech'`).** Some mechanisms (e.g. `U2FONDEVICE`) have no `PromptSelectMech`, and the menu loop iterates every key of the challenge dict. The patch iterates only `challenge['Mechanisms']` and labels entries with `PromptSelectMech`, falling back to `Name`, then `AnswerType`.
+1. **MFA menu crash (`KeyError: 'PromptSelectMech'`).** Some mechanisms have no `PromptSelectMech`, and the menu loop iterates every key of the challenge dict. The patch iterates only `challenge['Mechanisms']` and labels entries with `PromptSelectMech`, falling back to `Name`, then `AnswerType`.
 2. **Number matching is never shown.** Mobile Authenticator with `OTPWITHNUMBER: True` returns `Result.GeneratedAuthValue` from the start-OOB call, but the tool polls silently, so you can't tell which number to tap. The patch prints it.
 
 ## Manual install (what `install.sh` does)
@@ -155,8 +162,9 @@ The 2022 code breaks against the current API in two ways:
 DEST="$HOME/.local/share/cyberark-aws-cli"
 unzip -q aws-cli-utilities-master.zip "aws-cli-utilities-master/AWS CLI - Idaptive V1/*" -d /tmp/cyberark-aws
 mkdir -p "$DEST" && cp -R "/tmp/cyberark-aws/aws-cli-utilities-master/AWS CLI - Idaptive V1/." "$DEST/"
-patch -p1 -d "$DEST" < patches/auth-py-fixes.patch
-patch -p1 -d "$DEST" < patches/samlapp-fixes.patch
+for p in auth-py-fixes samlapp-fixes logging-fixes auth-global-state-fix samlapp-bounds-fix change-notices; do
+  patch -p1 -d "$DEST" < "patches/$p.patch"   # order matters
+done
 python3 -m venv "$DEST/.venv" && "$DEST/.venv/bin/pip" install boto3 requests colorama
 ```
 
@@ -167,7 +175,7 @@ Then copy `awslogin.zsh` to `$DEST/`, replace `<tenant>`, `<region>` and `<role-
 | Symptom | Cause / fix |
 |---|---|
 | `KeyError: 'PromptSelectMech'` | Unpatched `auth.py`. Re-run `install.sh`. |
-| MFA hangs on "Waiting for completing authentication mechanism" | You chose a security-key option. Ctrl-C, re-run, pick Mobile Authenticator. |
+| MFA hangs on "Waiting for completing authentication mechanism" | You chose a method other than Mobile Authenticator. Ctrl-C, re-run, pick Mobile Authenticator. |
 | No number shown for Mobile Authenticator | Unpatched `auth.py`. Re-run `install.sh`. |
 | "No IAM roles found in this app's SAML assertion" | That app is likely an Identity Center app. The tool returns you to the app menu — pick a different one. |
 | `Access Denied` from `AssumeRoleWithSAML` | The role isn't trusted for your SAML provider or you picked the wrong role. Check the ARN list. |
@@ -181,6 +189,37 @@ Then copy `awslogin.zsh` to `$DEST/`, replace `<tenant>`, `<region>` and `<role-
 - The tool rewrites `~/.aws/credentials` through a config parser: existing profiles are kept, comments are dropped.
 - Don't copy EC2 instance-role credentials to a laptop (GuardDuty flags it as credential exfiltration), and don't create long-lived IAM user keys for this.
 - Longer sessions need an admin to raise the role's `MaxSessionDuration` and the `SessionDuration` SAML attribute.
+
+## Future work / TODO
+
+**Linux and shell portability** (developed and tested on macOS only)
+- The Python tool is cross-platform; `msvcrt` is imported only on Windows and is unused elsewhere. `install.sh` uses only POSIX-style tools.
+- Debian/Ubuntu need `python3-venv` (`apt install python3-venv unzip patch`); `install.sh` should detect a missing `ensurepip` and say so.
+- `install.sh --zshrc` only knows `~/.zshrc`. Add bash support (`--rc <file>` or shell auto-detect) and rename the function file to `awslogin.sh`; the function body is already bash-compatible.
+- Test on a Linux container and add the result to Requirements.
+- WSL counts as Linux (WSL1 or WSL2); the tool is terminal-only, so no browser integration is needed. Things to document and test:
+  - Credentials land in the WSL home (`~/.aws/credentials`), not the Windows profile, so a Windows-side `aws.exe` or Terraform won't see them. Options: run `aws`/`terraform` inside WSL, or point `AWS_SHARED_CREDENTIALS_FILE` at a shared path.
+  - Install under the Linux filesystem (`~/.local/share/...`), not `/mnt/c/...`: it is faster and avoids permission problems with `chmod 600`.
+  - Clone the repo with LF line endings (`.gitattributes` with `*.sh text eol=lf`), or `install.sh` can fail with `\r` errors.
+  - Confirm the system clock stays in sync after WSL2 sleep/resume, since SAML assertions and STS are time-sensitive.
+- Native Windows is out of scope (upstream ships a PowerShell variant, unused here); use WSL.
+
+**Hardening and first-run fixes**
+- The tool does `open(~/.aws/credentials, 'w+')`: it fails if `~/.aws` doesn't exist, and a newly created file gets umask permissions (often `0644`). Have `install.sh` create `~/.aws` as `0700` and an empty credentials file as `0600` if absent.
+- Include the account ID in the profile name (e.g. `<account>-<role>`) so the same role name in two accounts doesn't overwrite one profile.
+- Add an `uninstall.sh` (the manual steps are in Uninstall).
+
+**Convenience**
+- One-pass login: pre-select the AWS app and role ARN (env vars such as `AWSLOGIN_APP` / `AWSLOGIN_ROLE_ARN`) and exit after one login instead of re-prompting.
+
+**Maintenance**
+- CI: `shellcheck` on `install.sh`, `bash -n` / `zsh -n`, and a `patch --dry-run` against the zip, so a bad patch is caught before it ships.
+- Watch upstream (CyberArk `aws-cli-utilities`) in case it fixes the MFA menu and number display, which would make the patch unnecessary.
+- Revisit [saml2aws](https://github.com/Versent/saml2aws) with the Browser provider once its pinned Playwright driver download works again; it would remove the Python tool entirely. Last tried with 2.36.19 (driver download returned 404).
+
+## License
+
+Original files in this repo are MIT-licensed (`LICENSE`). The bundled CyberArk `aws-cli-utilities` is Apache-2.0, Copyright 2019 CyberArk, LLC, and is redistributed unmodified in the zip; the patches change several upstream files and each patched file carries a change notice (see `NOTICE.md`). This project is independent and not affiliated with or endorsed by CyberArk or AWS.
 
 ## Uninstall
 

@@ -1,6 +1,17 @@
 --- a/core/auth.py
 +++ b/core/auth.py
-@@ -65,6 +65,17 @@
+@@ -11,6 +11,10 @@
+ # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ # See the License for the specific language governing permissions and
+ # limitations under the License.
++#
++# NOTICE: This file was modified from the original CyberArk version. Changes: the MFA menu tolerates
++# mechanisms without PromptSelectMech, and the Mobile Authenticator number-match value is printed.
++# See patches/auth-py-fixes.patch and NOTICE.md in the idira-aws repository.
+ 
+ from core.restclient import call_rest_post
+ from core.authrequest import AuthRequest
+@@ -65,6 +69,17 @@
      tenant_resp = AuthResponse(response, endpoint)
      return tenant_resp
      
@@ -18,7 +29,7 @@
  def advance_authentication(tenant_response, endpoint, username, version, proxy, environment):
      certpath = environment.get_certpath()
      method = "/Security/AdvanceAuthentication"
-@@ -78,20 +89,18 @@
+@@ -78,20 +93,18 @@
          logging.info("There are " + str(total_mechanism) + " mechanisms")
          
          if (total_mechanism > 1):
@@ -45,7 +56,7 @@
                  again = False
          else:
              mechanism = challenge['Mechanisms'][0]
-@@ -117,7 +126,7 @@
+@@ -117,7 +130,7 @@
      if (mechanism['Name'] == 'OATH'):
          choice = '1'
      if (choice == '1'):
@@ -54,7 +65,7 @@
          request = AdvAuthRequest(tenant_id, session_id, mechanism_id, passwd)
          json_req = request.get_adv_auth_json_passwd()
          authresp = call_rest_post(endpoint, method, json_req, headers, certpath, proxy, environment.get_debug())
-@@ -151,7 +160,7 @@
+@@ -151,7 +164,7 @@
      mechanism_id = mechanism['MechanismId']
      session_id = tenant_response.get_sessionid()
      tenant_id = tenant_response.get_tenantid()
@@ -63,7 +74,7 @@
      request = AdvAuthRequest(tenant_id, session_id, mechanism_id, passwd)
      json_req = request.get_adv_auth_json_passwd()
      headers = {}
-@@ -181,6 +190,7 @@
+@@ -181,6 +194,7 @@
      headers = {}
      authresp = call_rest_post(endpoint, method, json_req, headers, certpath, proxy, environment.get_debug())
      logging.info("The response is StartOob req" + authresp.text)
@@ -71,7 +82,7 @@
      handle_unix(mechanism, tenant_response, username, endpoint, method, environment, proxy, request, json_req)
  
  def advance_auth_for_mech(mechanism, tenant_response, username, endpoint, method, proxy, environment):
-@@ -208,7 +218,8 @@
+@@ -208,7 +222,8 @@
          json_req = request.get_adv_auth_json_startoob()
          headers = {}
          authresp = call_rest_post(endpoint, method, json_req, headers, certpath, proxy, environment.get_debug())
