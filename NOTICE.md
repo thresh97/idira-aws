@@ -15,8 +15,8 @@ This repository redistributes `aws-cli-utilities-master.zip`, CyberArk's `aws-cl
 
 The patches in `patches/` modify these upstream files: `AWSCLI.py`, `core/auth.py`, `core/authresponse.py`,
 `core/restclient.py`, `core/samlapp.py` and `core/uprest.py`. The changes make the tool work with current CyberArk
-Identity responses (MFA menu robustness, printing the Mobile Authenticator number-match value), handle apps without
-IAM roles, tighten input checks, and reduce what is written to the log. `patches/change-notices.patch` adds a notice
+Identity responses (MFA menu robustness, printing the Mobile Authenticator number-match value), make MFA polling
+robust (pacing, retries, timeout), handle apps without IAM roles, tighten input checks, and reduce what is written to the log. `patches/change-notices.patch` adds a notice
 to each modified file stating this, as Apache-2.0 section 4(b) requires. `install.sh` applies the patches at install
 time; the modified files are not stored in this repository.
 

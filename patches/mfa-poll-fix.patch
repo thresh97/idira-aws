@@ -1,0 +1,80 @@
+--- a/core/auth.py
++++ b/core/auth.py
+@@ -115,6 +115,39 @@
+     print("2. Use URL")
+     return input("Enter (1) or (2) to select: ")
+ 
++POLL_INTERVAL = 2
++POLL_TIMEOUT = 180
++POLL_MAX_BAD_RESPONSES = 5
++
++def poll_oob(endpoint, method, json_req, environment, proxy):
++    # The service can answer a poll with a non-JSON body (e.g. when throttled); retry instead of crashing.
++    deadline = time.time() + POLL_TIMEOUT
++    bad_responses = 0
++    while (True):
++        authresp = call_rest_post(endpoint, method, json_req, {}, environment.get_certpath(), proxy, environment.get_debug())
++        try:
++            resp = AuthResponse(authresp, endpoint)
++            success_result = resp.get_success_result()
++            summary = resp.get_summary() if success_result == True else None
++        except (ValueError, KeyError, TypeError):
++            bad_responses = bad_responses + 1
++            logging.warning("Unexpected poll response, HTTP " + str(authresp.status_code))
++            if (bad_responses >= POLL_MAX_BAD_RESPONSES):
++                print(Fore.RED + "Authentication service kept returning invalid responses (HTTP " + str(authresp.status_code) + "). Please try again.")
++                print(Style.RESET_ALL)
++                sys.exit(1)
++            time.sleep(POLL_INTERVAL * bad_responses)
++            continue
++        bad_responses = 0
++        logging.info("Success : " + str(success_result) + " Summary : " + str(summary))
++        if (success_result != True or summary != "OobPending"):
++            return authresp, success_result, summary
++        if (time.time() > deadline):
++            print(Fore.RED + "Timed out waiting for the authentication to be approved. Please try again.")
++            print(Style.RESET_ALL)
++            sys.exit(1)
++        time.sleep(POLL_INTERVAL)
++
+ def handle_unix(mechanism, tenant_response, username, endpoint, method, environment, proxy, request, json_req):
+     certpath = environment.get_certpath()
+     mechanism_id = mechanism['MechanismId']
+@@ -141,16 +174,7 @@
+     else:
+         print("Waiting for completing authentication mechanism.. ")
+         json_req = request.get_adv_auth_json_poll()
+-        while (True):
+-            authresp = call_rest_post(endpoint, method, json_req, headers, certpath, proxy, environment.get_debug())
+-            resp = AuthResponse(authresp, endpoint)
+-            success_result = resp.get_success_result()
+-            summary = resp.get_summary()
+-            logging.info("Success : " + str(success_result) + " Summary : " + summary)
+-            if (success_result == True and summary != "OobPending"):
+-                break
+-            if (success_result != True):
+-                break
++        authresp, success_result, summary = poll_oob(endpoint, method, json_req, environment, proxy)
+     return authresp, success_result, summary
+ 
+ 
+@@ -213,18 +237,7 @@
+         show_oob_number(authresp)
+         print(mech_label(mechanism) + " Waiting ......")
+         json_req = request.get_adv_auth_json_poll()
+-        while (True):
+-            sys.stdout.write(".")
+-            authresp = call_rest_post(endpoint, method, json_req, headers, certpath, proxy, environment.get_debug())
+-            resp = AuthResponse(authresp, endpoint)
+-            success_result = resp.get_success_result()
+-            summary = resp.get_summary()
+-            if (success_result == True and summary != "OobPending"):
+-                break
+-            if (success_result != True):
+-                break
+-            time.sleep(2)
+-        print()
++        authresp, success_result, summary = poll_oob(endpoint, method, json_req, environment, proxy)
+         logging.info("Is it Successful : " + str(success_result))
+         logging.info(summary)
+     if (success_result == True and summary == "LoginSuccess"):

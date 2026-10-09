@@ -65,7 +65,7 @@
  #
  # NOTICE: This file was modified from the original CyberArk version. Changes: the MFA menu tolerates
 -# mechanisms without PromptSelectMech, and the Mobile Authenticator number-match value is printed.
-+# mechanisms without PromptSelectMech, and the Mobile Authenticator number-match value is printed, and authentication results are returned instead of kept in module-level state.
++# mechanisms without PromptSelectMech, and the Mobile Authenticator number-match value is printed, authentication results are returned instead of kept in module-level state, and MFA polling waits between requests, retries invalid responses and times out.
  # See patches/auth-py-fixes.patch and NOTICE.md in the idira-aws repository.
  
  from core.restclient import call_rest_post

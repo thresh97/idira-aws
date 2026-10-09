@@ -142,6 +142,7 @@ Terraform's AWS provider picks up `AWS_PROFILE` (or `profile = "..."` in the pro
 | `patches/samlapp-bounds-fix.patch` | Rejects a role number of zero or below instead of indexing from the end of the list. |
 | `patches/auth-global-state-fix.patch` | Returns authentication results from the handlers instead of keeping them in module-level lists. |
 | `patches/logging-fixes.patch` | Creates `aws-cli.log` with owner-only permissions, moves request/response/app details from INFO to DEBUG, tightens the app-number check, and exits non-zero when no profile was created. |
+| `patches/mfa-poll-fix.patch` | MFA polling waits 2 s between requests (it used to poll in a tight loop), retries non-JSON responses instead of crashing with `JSONDecodeError`, and gives up after 3 minutes. |
 | `patches/change-notices.patch` | Adds the Apache-2.0 change notice to every upstream file the other patches modify. Apply last. |
 | `awslogin.zsh` | Template for the `awslogin` shell function; `install.sh` fills in the placeholders. |
 | `install.sh` | Extracts the zip, applies the patches in order, creates a venv with `boto3 requests colorama`, writes `awslogin.zsh`. Safe to re-run. |
@@ -162,7 +163,7 @@ Terraform's AWS provider picks up `AWS_PROFILE` (or `profile = "..."` in the pro
 DEST="$HOME/.local/share/cyberark-aws-cli"
 unzip -q aws-cli-utilities-master.zip "aws-cli-utilities-master/AWS CLI - Idaptive V1/*" -d /tmp/cyberark-aws
 mkdir -p "$DEST" && cp -R "/tmp/cyberark-aws/aws-cli-utilities-master/AWS CLI - Idaptive V1/." "$DEST/"
-for p in auth-py-fixes samlapp-fixes logging-fixes auth-global-state-fix samlapp-bounds-fix change-notices; do
+for p in auth-py-fixes samlapp-fixes logging-fixes auth-global-state-fix samlapp-bounds-fix mfa-poll-fix change-notices; do
   patch -p1 -d "$DEST" < "patches/$p.patch"   # order matters
 done
 python3 -m venv "$DEST/.venv" && "$DEST/.venv/bin/pip" install boto3 requests colorama
@@ -175,7 +176,9 @@ Then copy `awslogin.zsh` to `$DEST/`, replace `<tenant>`, `<region>` and `<role-
 | Symptom | Cause / fix |
 |---|---|
 | `KeyError: 'PromptSelectMech'` | Unpatched `auth.py`. Re-run `install.sh`. |
-| MFA hangs on "Waiting for completing authentication mechanism" | You chose a method other than Mobile Authenticator. Ctrl-C, re-run, pick Mobile Authenticator. |
+| MFA hangs on "Waiting for completing authentication mechanism", then times out after 3 minutes | You chose a method other than Mobile Authenticator, or didn't approve in time. Re-run and pick Mobile Authenticator. |
+| `JSONDecodeError: Expecting value` after "Waiting for completing authentication mechanism" | Unpatched `auth.py` polled too fast and got a non-JSON reply. Re-run `install.sh`. |
+| "Authentication service kept returning invalid responses (HTTP NNN)" | The service returned five non-JSON replies in a row. Wait a minute and retry. Run `grep -n "Unexpected poll response" aws-cli.log` in the install directory to see the status codes. |
 | No number shown for Mobile Authenticator | Unpatched `auth.py`. Re-run `install.sh`. |
 | "No IAM roles found in this app's SAML assertion" | That app is likely an Identity Center app. The tool returns you to the app menu — pick a different one. |
 | `Access Denied` from `AssumeRoleWithSAML` | The role isn't trusted for your SAML provider or you picked the wrong role. Check the ARN list. |

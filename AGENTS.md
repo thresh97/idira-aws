@@ -51,7 +51,8 @@ Always pass `--dest` when testing; the default destination is the user's working
 
 - The tool exits 0 on failure; judge success by `aws sts get-caller-identity`, not exit codes. That is why `awslogin` chains the check before exporting `AWS_PROFILE`.
 - Credentials expire after one hour. The tool doesn't set `DurationSeconds`.
-- Only Mobile Authenticator MFA works (number matching; the patch prints the number). Other methods poll forever or fail.
+- Only Mobile Authenticator MFA works (number matching; the patch prints the number). Other methods poll until the 3-minute timeout, or fail.
+- MFA polling (`poll_oob` in `mfa-poll-fix.patch`) sleeps 2 s between requests. Upstream polled the Mobile Authenticator path in a tight loop and crashed with `JSONDecodeError` when the service returned a non-JSON body. Non-JSON replies are now retried with backoff, and the tool exits 1 after five in a row.
 - Picking an app with no IAM roles in its assertion (typically Identity Center) prints a message and returns to the app menu; pick another app.
 - The tool must run from its own directory (reads `proxy.properties`, writes `aws-cli.log` there); `awslogin` does `cd` in a subshell.
 - The tool rewrites `~/.aws/credentials` via `RawConfigParser`: profiles are kept, comments are dropped. The profile is named `<role-name>_profile`.
