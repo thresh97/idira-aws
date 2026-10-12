@@ -1,0 +1,164 @@
+--- a/AWSCLI.py
++++ b/AWSCLI.py
+@@ -41,7 +41,11 @@
+ 
+ 
+ def login_instance(proxy, environment):
+-    user = input('Please enter your username : ')
++    user = os.environ.get('AWSLOGIN_USER', '').strip()
++    if user:
++        print('Username : ' + user)
++    else:
++        user = input('Please enter your username : ')
+     version = "1.0"
+     session = auth.interactive_login(user, version, proxy, environment)
+     return session, user
+@@ -59,6 +63,16 @@
+     print("Logfile - aws-cli.log")
+     
+ 
++def find_preset_app(awsapps):
++    want = os.environ.get('AWSLOGIN_APP', '').strip().lower()
++    if not want:
++        return None
++    hits = [i for i, app in enumerate(awsapps, 1) if want == app['AppKey'].lower() or want in app['DisplayName'].lower()]
++    if len(hits) == 1:
++        return hits[0]
++    print("AWSLOGIN_APP='" + want + "' matched " + str(len(hits)) + " apps; choose one below.")
++    return None
++
+ def select_app(awsapps):
+     print("Select the aws app to login. Type 'quit' or 'q' to exit")
+     count = 1
+@@ -121,8 +135,9 @@
+     pattern = re.compile("[^0-9.]")
+     count = 1
+     profilecount = [0] * len(awsapps)
++    preset_app = find_preset_app(awsapps)
+     while(True):
+-        number = select_app(awsapps)
++        number = str(preset_app) if preset_app else select_app(awsapps)
+         if (number == ""):
+             continue
+         if (re.match(pattern, number)):
+@@ -146,7 +161,7 @@
+             if (_quit == 'one_role_quit'):
+                 break
+ 
+-        if (len(awsapps) == 1):
++        if (len(awsapps) == 1 or preset_app):
+             break
+ 
+     logging.info("Done")
+--- a/core/auth.py
++++ b/core/auth.py
+@@ -23,6 +23,10 @@
+ from getpass import getpass
+ from core.authsession import AuthSession
+ import logging
++import os
++import re
++import shlex
++import subprocess
+ import sys
+ import time
+ from threading import Thread
+@@ -68,6 +72,35 @@
+     
+ def mech_label(mechanism):
+     return str(mechanism.get('PromptSelectMech') or mechanism.get('Name') or mechanism.get('AnswerType'))
++
++def preselected_mechanism(mechanisms):
++    want = os.environ.get('AWSLOGIN_MECH', '').strip().lower()
++    if not want:
++        return None
++    hits = [m for m in mechanisms if want in str(m.get('Name', '')).lower() or want in mech_label(m).lower()]
++    if len(hits) == 1:
++        return hits[0]
++    print("AWSLOGIN_MECH='" + want + "' matched " + str(len(hits)) + " of " + str(len(mechanisms)) + " mechanisms; choose one below.")
++    return None
++
++SECRET_CMD_VARS = {'OATH': 'AWSLOGIN_OTP_CMD', 'UP': 'AWSLOGIN_PASSWORD_CMD'}
++
++def read_mech_secret(mechanism):
++    name = mechanism.get('Name')
++    var = SECRET_CMD_VARS.get(name)
++    cmd = os.environ.get(var, '').strip() if var else ''
++    if cmd:
++        try:
++            out = subprocess.run(shlex.split(cmd), stdout=subprocess.PIPE, check=True, timeout=60).stdout.decode().rstrip('\r\n')
++        except (OSError, ValueError, subprocess.SubprocessError):
++            print(Fore.RED + var + " failed; enter it manually." + Style.RESET_ALL)
++        else:
++            if name == 'OATH':
++                out = out.strip()
++            if out and (name != 'OATH' or re.fullmatch(r'\d{6,8}', out)):
++                return out
++            print(Fore.RED + var + " did not print a usable value; enter it manually." + Style.RESET_ALL)
++    return getpass(mech_label(mechanism) + " : ")
+ 
+ def show_oob_number(authresp):
+     try:
+@@ -91,7 +124,8 @@
+         
+         if (total_mechanism > 1):
+             mechanisms = challenge['Mechanisms']
+-            again = True
++            mechanism = preselected_mechanism(mechanisms)
++            again = mechanism is None
+             while(again):
+                 for count, mech in enumerate(mechanisms, 1):
+                     print(str(count) + " : " + mech_label(mech))
+@@ -160,7 +194,7 @@
+     if (mechanism['Name'] == 'OATH'):
+         choice = '1'
+     if (choice == '1'):
+-        passwd = getpass(mech_label(mechanism) + " : ")
++        passwd = read_mech_secret(mechanism)
+         request = AdvAuthRequest(tenant_id, session_id, mechanism_id, passwd)
+         json_req = request.get_adv_auth_json_passwd()
+         authresp = call_rest_post(endpoint, method, json_req, headers, certpath, proxy, environment.get_debug())
+@@ -183,7 +217,7 @@
+     mechanism_id = mechanism['MechanismId']
+     session_id = tenant_response.get_sessionid()
+     tenant_id = tenant_response.get_tenantid()
+-    passwd = getpass(mech_label(mechanism) + " : ")
++    passwd = read_mech_secret(mechanism)
+     request = AdvAuthRequest(tenant_id, session_id, mechanism_id, passwd)
+     json_req = request.get_adv_auth_json_passwd()
+     headers = {}
+--- a/core/samlapp.py
++++ b/core/samlapp.py
+@@ -16,6 +16,7 @@
+ from core.htmlresponse import HtmlResponse
+ import base64
+ import xml.etree.ElementTree as ET
++import os
+ import sys
+ from core.awsinputs import AwsInputs
+ from core.util import printline
+@@ -94,8 +95,14 @@
+     print("multiple profile creations. ")
+     print("Type 'q' to exit.")
+     print(Style.RESET_ALL)
++    preset_role = os.environ.get('AWSLOGIN_ROLE_ARN', '').strip()
++    if preset_role and preset_role not in allroles:
++        print("AWSLOGIN_ROLE_ARN is not in this app's role list; choose one below.")
++        preset_role = ''
+     print('Please choose the role you would like to assume -')
+-    if (len(allroles) > 1):
++    if preset_role:
++        selection = allroles.index(preset_role) + 1
++    elif (len(allroles) > 1):
+         i = 1
+         for role in allroles:
+             print('[',i,']: ', role)
+@@ -122,6 +129,6 @@
+     print('Your SAML Provider : ', principle)
+         
+     awsinputs = AwsInputs(role, principle, encoded_saml)
+-    if (len(allroles) == 1):
++    if (len(allroles) == 1 or preset_role):
+         return 'one_role_quit', awsinputs
+     return 'go', awsinputs
+\ No newline at end of file

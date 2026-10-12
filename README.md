@@ -11,19 +11,20 @@ This applies when clicking the AWS tile lands on `https://signin.aws.amazon.com/
 Requirements: macOS with zsh (Linux, including WSL, should work but is untested, see [Future work](#future-work--todo)), Python 3 (with `venv`), `unzip`, `patch`, and the [AWS CLI](https://aws.amazon.com/cli/).
 
 ```bash
-./install.sh --tenant <tenant> --region <aws-region> --role <role-name> --zshrc
+./install.sh --tenant <tenant> --region <aws-region> --zshrc
 ```
 
 - `--tenant`: your CyberArk tenant, `acme` or the full host `acme.id.cyberark.cloud`.
 - `--region`: AWS region written to the profile, e.g. `us-west-2`.
-- `--role`: the IAM role **name** you assume (not the ARN), e.g. `my_admin_role`. The tool names the profile `<role-name>_profile`.
+- `--role` (optional): the IAM role **name** you assume (not the ARN), e.g. `my_admin_role`. The tool names the profile `<role-name>_profile`, and `awslogin` verifies and exports that profile. Without `--role`, `awslogin` derives the profile from `AWSLOGIN_ROLE_ARN` (see [Faster logins](#faster-logins-yubikey-and-presets)) or `AWSLOGIN_PROFILE`; if neither is set it still logs in but skips the check and doesn't set `AWS_PROFILE`.
 - `--zshrc`: append the `source` line to `~/.zshrc`. Omit it to have the line printed instead.
 - `--dest <dir>`: install somewhere other than `~/.local/share/cyberark-aws-cli`.
 
 Example with made-up values (substitute yours):
 
 ```bash
-./install.sh --tenant acme --region us-west-2 --role my_admin_role --zshrc
+./install.sh --tenant acme --region us-west-2 --zshrc
+./install.sh --tenant acme --region us-west-2 --role my_admin_role --zshrc   # also sets a default profile
 ```
 
 Then open a new terminal and run `awslogin`.
@@ -38,7 +39,7 @@ Then open a new terminal and run `awslogin`.
 | AWS app | `AWS Example IDP` | The tile in the app portal that opens `signin.aws.amazon.com/saml`. The tool lists every AWS-type app you have. |
 | Username | `jdoe` | Your CyberArk login name as entered at the prompt. Here it is the short username, not the email/UPN. Only if the short name is rejected, try the full email. |
 
-Not sure of the role name? Run the tool once with any `--role`, read the ARN list at the role prompt, then re-run `install.sh` with the right name, or set `AWSLOGIN_PROFILE` later.
+Not sure of the role name? Skip `--role`, run `awslogin`, and read the ARN list at the role prompt. Then set `AWSLOGIN_ROLE_ARN` to the ARN you want (or `AWSLOGIN_PROFILE` to the profile name).
 
 ## How it works
 
@@ -79,11 +80,11 @@ flowchart TD
 ## Using awslogin
 
 1. Enter your short username (not the email/UPN), then your password.
-2. Pick **Mobile Authenticator** and tap the number printed as `>>> Select this number on your phone: NN`. Other MFA methods are not supported by this tool.
+2. Pick **Mobile Authenticator** and tap the number printed as `>>> Select this number on your phone: NN`. Only Mobile Authenticator has been verified end to end. Every other method is untested or unsupported (see [MFA status](#mfa-method-status)).
 3. Pick the **IAM SAML** AWS app. An app whose assertion has no IAM roles (typically an Identity Center app) prints an error and returns you to the app menu; just pick a different app.
 4. Pick your role. The tool re-prompts after each success; enter `q` to exit.
 
-`awslogin` then runs `aws sts get-caller-identity` and, if that succeeds, exports `AWS_PROFILE=<role-name>_profile` in your shell. Credentials last one hour; run `awslogin` again to refresh.
+`awslogin` then runs `aws sts get-caller-identity` and, if that succeeds, exports `AWS_PROFILE=<role-name>_profile` in your shell. The profile name comes from `AWSLOGIN_PROFILE`, else from `AWSLOGIN_ROLE_ARN` (the segment after the first `/` of the ARN, as the tool names it), else from `--role` at install time. Credentials last one hour; run `awslogin` again to refresh.
 
 ### Example session (made-up values)
 
@@ -121,7 +122,53 @@ Enter Number : q
 
 Role names can repeat across accounts (here `my_admin_role` exists in two). The profile is named after the role only, so picking the same role name in a different account overwrites the previous profile. Choose the ARN for the account you want.
 
-Overrides (environment variables): `AWSLOGIN_PROFILE`, `AWSLOGIN_REGION`. Extra arguments are passed to the tool, e.g. `awslogin -d` for debug output.
+Overrides (environment variables): `AWSLOGIN_PROFILE`, `AWSLOGIN_REGION`, plus the login presets below. Extra arguments are passed to the tool, e.g. `awslogin -d` for debug output.
+
+### MFA method status
+
+| Method | Status |
+|---|---|
+| Mobile Authenticator (number-match push) | Works; verified end to end, including with all the presets below. |
+| Code entry (OATH OTP, including a YubiKey OATH applet via `AWSLOGIN_OTP_CMD`) | **Untested.** Only exercised against fake commands, never against a live tenant. It also only works if your login policy offers an OATH mechanism. |
+| FIDO2 / security key (`U2F`) | **Not supported.** The tool can't produce the signed answer, so choosing it hangs until the 3-minute timeout. |
+| On-device / browser authenticator (`U2FONDEVICE`) | **Not supported.** Same hang. |
+| Anything else | Untested; assume it hangs or fails. |
+
+If `AWSLOGIN_MECH` matches a non-Mobile method, you are on the untested paths above. Use `AWSLOGIN_MECH=mobile` (or leave it unset and pick Mobile Authenticator) for a login that works.
+
+### Faster logins: YubiKey and presets
+
+These environment variables skip prompts. Set them in `~/.zshrc` (or inline: `AWSLOGIN_APP=... awslogin`). All are optional and independent; anything unset is prompted for as before. The password is prompted for unless you opt in to `AWSLOGIN_PASSWORD_CMD`; this tool never stores it.
+
+| Variable | Effect |
+|---|---|
+| `AWSLOGIN_USER` | Skip the username prompt. |
+| `AWSLOGIN_MECH` | Case-insensitive text matched against the MFA mechanism name or label (for example `oath` or `mobile`). Used only when it matches exactly one mechanism; otherwise the menu is shown. |
+| `AWSLOGIN_OTP_CMD` | **Untested against a live tenant.** Command (run without a shell, quoting as in `shlex`) that prints the OATH one-time code. Used only for the OATH mechanism, and only if the output is 6-8 digits; otherwise you are prompted. |
+| `AWSLOGIN_PASSWORD_CMD` | Command (run without a shell) that prints your CyberArk password. Used only for the password step; if it fails or prints nothing you are prompted. See the caution below. |
+| `AWSLOGIN_APP` | Select the AWS app: the app key, or text contained in its display name. Must match exactly one app. |
+| `AWSLOGIN_ROLE_ARN` | Select this role ARN exactly. When it is found, the tool exits after that one login instead of re-prompting. |
+
+With a YubiKey (**untested**, see MFA method status): enroll the key as the OATH authenticator (scan the OTP QR code from your CyberArk account page into Yubico Authenticator, or add the secret with `ykman oath accounts add`), then:
+
+```bash
+export AWSLOGIN_USER=jdoe
+export AWSLOGIN_MECH=oath
+export AWSLOGIN_OTP_CMD='ykman oath accounts code -s <account-name>'
+export AWSLOGIN_APP='AWS Example IDP'
+export AWSLOGIN_ROLE_ARN='arn:aws:iam::123456789012:role/my_admin_role'
+```
+
+`awslogin` then asks for the password (or runs `AWSLOGIN_PASSWORD_CMD`, below), you touch the key if it is set to require touch, and the profile is written. `ykman oath accounts list` shows the account name to use. This is the YubiKey's OATH (TOTP) applet; the 44-character code the key types when tapped (Yubico OTP) is a different thing and is not used. It shortens each login but not the session: credentials still last one hour.
+
+**Optional: fetch the password from the macOS Keychain.** Don't put the password in an environment variable or dotfile; point `AWSLOGIN_PASSWORD_CMD` at a command that reads it from a secret store:
+
+```bash
+security add-generic-password -a "$USER" -s awslogin -w     # prompts for the password; don't type it on the command line
+export AWSLOGIN_PASSWORD_CMD='security find-generic-password -a '"$USER"' -s awslogin -w'
+```
+
+Caution: with the password and the OTP both automated, the YubiKey touch is the only thing standing between a process running as you and a login. Keep touch required on the OATH entry (`ykman oath accounts add --touch ...`, or re-add the existing one), and leave `AWSLOGIN_PASSWORD_CMD` unset if you'd rather type the password.
 
 ### Using the profile
 
@@ -143,6 +190,7 @@ Terraform's AWS provider picks up `AWS_PROFILE` (or `profile = "..."` in the pro
 | `patches/auth-global-state-fix.patch` | Returns authentication results from the handlers instead of keeping them in module-level lists. |
 | `patches/logging-fixes.patch` | Creates `aws-cli.log` with owner-only permissions, moves request/response/app details from INFO to DEBUG, tightens the app-number check, and exits non-zero when no profile was created. |
 | `patches/mfa-poll-fix.patch` | MFA polling waits 2 s between requests (it used to poll in a tight loop), retries non-JSON responses instead of crashing with `JSONDecodeError`, and gives up after 3 minutes. |
+| `patches/onepass-otp.patch` | Optional environment variables to preselect username, MFA mechanism, AWS app and role, and to read the OATH code and (opt-in) the password from commands such as `ykman` and `security` (see [Faster logins](#faster-logins-yubikey-and-presets)). |
 | `patches/change-notices.patch` | Adds the Apache-2.0 change notice to every upstream file the other patches modify. Apply last. |
 | `awslogin.zsh` | Template for the `awslogin` shell function; `install.sh` fills in the placeholders. |
 | `install.sh` | Extracts the zip, applies the patches in order, creates a venv with `boto3 requests colorama`, writes `awslogin.zsh`. Safe to re-run. |
@@ -163,20 +211,20 @@ Terraform's AWS provider picks up `AWS_PROFILE` (or `profile = "..."` in the pro
 DEST="$HOME/.local/share/cyberark-aws-cli"
 unzip -q aws-cli-utilities-master.zip "aws-cli-utilities-master/AWS CLI - Idaptive V1/*" -d /tmp/cyberark-aws
 mkdir -p "$DEST" && cp -R "/tmp/cyberark-aws/aws-cli-utilities-master/AWS CLI - Idaptive V1/." "$DEST/"
-for p in auth-py-fixes samlapp-fixes logging-fixes auth-global-state-fix samlapp-bounds-fix mfa-poll-fix change-notices; do
+for p in auth-py-fixes samlapp-fixes logging-fixes auth-global-state-fix samlapp-bounds-fix mfa-poll-fix onepass-otp change-notices; do
   patch -p1 -d "$DEST" < "patches/$p.patch"   # order matters
 done
 python3 -m venv "$DEST/.venv" && "$DEST/.venv/bin/pip" install boto3 requests colorama
 ```
 
-Then copy `awslogin.zsh` to `$DEST/`, replace `<tenant>`, `<region>` and `<role-name>`, and `source` it from `~/.zshrc`. The tool must run from its own directory (it reads `proxy.properties` and writes `aws-cli.log` there), which the function handles with `cd`.
+Then copy `awslogin.zsh` to `$DEST/`, replace `<tenant>`, `<region>` and `<default-profile>` (the profile name, or empty), and `source` it from `~/.zshrc`. The tool must run from its own directory (it reads `proxy.properties` and writes `aws-cli.log` there), which the function handles with `cd`.
 
 ## Troubleshooting
 
 | Symptom | Cause / fix |
 |---|---|
 | `KeyError: 'PromptSelectMech'` | Unpatched `auth.py`. Re-run `install.sh`. |
-| MFA hangs on "Waiting for completing authentication mechanism", then times out after 3 minutes | You chose a method other than Mobile Authenticator, or didn't approve in time. Re-run and pick Mobile Authenticator. |
+| MFA hangs on "Waiting for completing authentication mechanism", then times out after 3 minutes | You chose a method other than Mobile Authenticator (FIDO2 and on-device are unsupported), or didn't approve in time. Re-run and pick Mobile Authenticator. |
 | `JSONDecodeError: Expecting value` after "Waiting for completing authentication mechanism" | Unpatched `auth.py` polled too fast and got a non-JSON reply. Re-run `install.sh`. |
 | "Authentication service kept returning invalid responses (HTTP NNN)" | The service returned five non-JSON replies in a row. Wait a minute and retry. Run `grep -n "Unexpected poll response" aws-cli.log` in the install directory to see the status codes. |
 | No number shown for Mobile Authenticator | Unpatched `auth.py`. Re-run `install.sh`. |
@@ -184,7 +232,7 @@ Then copy `awslogin.zsh` to `$DEST/`, replace `<tenant>`, `<region>` and `<role-
 | `Access Denied` from `AssumeRoleWithSAML` | The role isn't trusted for your SAML provider or you picked the wrong role. Check the ARN list. |
 | `aws: [ERROR]: The config profile (...) could not be found` right after a failed login | Harmless. The tool exits 0 on failure, so the follow-up check ran anyway. |
 | Expired credentials | They last one hour. Run `awslogin` again. |
-| Wrong profile name | The tool names it `<role>_profile` from the role you picked. Set `AWSLOGIN_PROFILE`. |
+| Wrong profile name, or "profile name unknown" | The tool names it `<role>_profile` from the role you picked. Set `AWSLOGIN_ROLE_ARN` or `AWSLOGIN_PROFILE`, or install with `--role`. |
 
 ## Security notes
 
@@ -211,9 +259,6 @@ Then copy `awslogin.zsh` to `$DEST/`, replace `<tenant>`, `<region>` and `<role-
 - The tool does `open(~/.aws/credentials, 'w+')`: it fails if `~/.aws` doesn't exist, and a newly created file gets umask permissions (often `0644`). Have `install.sh` create `~/.aws` as `0700` and an empty credentials file as `0600` if absent.
 - Include the account ID in the profile name (e.g. `<account>-<role>`) so the same role name in two accounts doesn't overwrite one profile.
 - Add an `uninstall.sh` (the manual steps are in Uninstall).
-
-**Convenience**
-- One-pass login: pre-select the AWS app and role ARN (env vars such as `AWSLOGIN_APP` / `AWSLOGIN_ROLE_ARN`) and exit after one login instead of re-prompting.
 
 **Maintenance**
 - CI: `shellcheck` on `install.sh`, `bash -n` / `zsh -n`, and a `patch --dry-run` against the zip, so a bad patch is caught before it ships.

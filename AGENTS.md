@@ -8,7 +8,7 @@ Repo for getting local AWS CLI / Terraform credentials through CyberArk Identity
 |---|---|---|
 | `aws-cli-utilities-master.zip` | Pristine upstream tool. Single source of truth for the original. | Never |
 | `patches/*.patch` | Our changes to upstream, applied in the order listed in `install.sh` (`change-notices.patch` last). | Yes, by regenerating (below) |
-| `awslogin.zsh` | Template with `<tenant>`, `<region>`, `<role-name>` placeholders. | Yes |
+| `awslogin.zsh` | Template with `<tenant>`, `<region>`, `<default-profile>` placeholders (`install.sh` fills the last from the optional `--role`). | Yes |
 | `install.sh` | Extracts zip, applies patches, builds venv, renders `awslogin.zsh`. Idempotent. | Yes |
 | `README.md`, `AGENTS.md` | Docs. | Yes |
 | `LICENSE` | MIT, for our original files only. | Rarely |
@@ -51,17 +51,18 @@ Always pass `--dest` when testing; the default destination is the user's working
 
 - The tool exits 0 on failure; judge success by `aws sts get-caller-identity`, not exit codes. That is why `awslogin` chains the check before exporting `AWS_PROFILE`.
 - Credentials expire after one hour. The tool doesn't set `DurationSeconds`.
-- Only Mobile Authenticator MFA works (number matching; the patch prints the number). Other methods poll until the 3-minute timeout, or fail.
+- Only Mobile Authenticator MFA is verified end to end (number matching; the patch prints the number). Code-entry mechanisms (`AnswerType: Text`, e.g. OATH, including `AWSLOGIN_OTP_CMD`) are **untested** against a live tenant (fake-command tests only). FIDO2 (`U2F`) and `U2FONDEVICE` are **unsupported**: the signed-answer format is undocumented, and choosing them polls until the 3-minute timeout. Don't claim any non-mobile path works until a user has run it.
+- `onepass-otp.patch` adds opt-in env vars: `AWSLOGIN_USER`, `AWSLOGIN_MECH`, `AWSLOGIN_OTP_CMD` (run without a shell, only for the `OATH` mechanism, output must be 6-8 digits, otherwise falls back to the prompt), `AWSLOGIN_PASSWORD_CMD` (same mechanism, only for the `UP` password step, opt-in), `AWSLOGIN_APP`, `AWSLOGIN_ROLE_ARN` (a match makes the tool exit after one login). The tool reads the password only from the prompt or from `AWSLOGIN_PASSWORD_CMD`'s output; never add a variable holding the password itself, never log it, and never store it in the repo or the install directory.
 - MFA polling (`poll_oob` in `mfa-poll-fix.patch`) sleeps 2 s between requests. Upstream polled the Mobile Authenticator path in a tight loop and crashed with `JSONDecodeError` when the service returned a non-JSON body. Non-JSON replies are now retried with backoff, and the tool exits 1 after five in a row.
 - Picking an app with no IAM roles in its assertion (typically Identity Center) prints a message and returns to the app menu; pick another app.
 - The tool must run from its own directory (reads `proxy.properties`, writes `aws-cli.log` there); `awslogin` does `cd` in a subshell.
-- The tool rewrites `~/.aws/credentials` via `RawConfigParser`: profiles are kept, comments are dropped. The profile is named `<role-name>_profile`.
+- The tool rewrites `~/.aws/credentials` via `RawConfigParser`: profiles are kept, comments are dropped. The profile is named `<role-name>_profile`, taken from the segment after the first `/` of the role ARN (`aws/assumerolesaml.py`). `awslogin` mirrors that when deriving the profile from `AWSLOGIN_ROLE_ARN`; keep the two in sync. `--role` is optional: profile precedence in the function is `AWSLOGIN_PROFILE`, then `AWSLOGIN_ROLE_ARN`, then the install-time default; with none, the credentials check and `AWS_PROFILE` export are skipped.
 - Tool dependencies are only `boto3`, `requests`, `colorama`; it targets plain IAM SAML (`sts:AssumeRoleWithSAML`), not IAM Identity Center.
 - saml2aws (Browser provider) was tried and is a dead end for now: version 2.36.19 pins Playwright driver 1.47.2, whose download host is retired (404). Don't suggest it again unless a newer release fixes the driver download.
 
 ## Future work
 
-The backlog (Linux/bash portability, `~/.aws` creation and permissions, account-aware profile names, one-pass login, CI) lives in the README under "Future work / TODO". When you complete an item, remove it there and update README, `install.sh --help` and this file together. Linux (including WSL) is untested: don't claim it works until it has been run there. Treat WSL as Linux, and keep the scripts LF-only and bash 3.2-compatible so both macOS and WSL work.
+The backlog (Linux/bash portability, `~/.aws` creation and permissions, account-aware profile names, CI) lives in the README under "Future work / TODO". When you complete an item, remove it there and update README, `install.sh --help` and this file together. Linux (including WSL) is untested: don't claim it works until it has been run there. Treat WSL as Linux, and keep the scripts LF-only and bash 3.2-compatible so both macOS and WSL work.
 
 ## Style
 

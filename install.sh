@@ -11,6 +11,7 @@ LOGGING_PATCH="$REPO_DIR/patches/logging-fixes.patch"
 AUTH_STATE_PATCH="$REPO_DIR/patches/auth-global-state-fix.patch"
 SAMLAPP_BOUNDS_PATCH="$REPO_DIR/patches/samlapp-bounds-fix.patch"
 MFA_POLL_PATCH="$REPO_DIR/patches/mfa-poll-fix.patch"
+ONEPASS_PATCH="$REPO_DIR/patches/onepass-otp.patch"
 NOTICES_PATCH="$REPO_DIR/patches/change-notices.patch"
 TEMPLATE="$REPO_DIR/awslogin.zsh"
 TOOL_SUBDIR="aws-cli-utilities-master/AWS CLI - Idaptive V1"
@@ -20,11 +21,13 @@ TENANT="" REGION="" ROLE="" EDIT_ZSHRC=0
 
 usage() {
   cat <<'EOF'
-Usage: ./install.sh --tenant <name|host> --region <aws-region> --role <role-name> [--dest <dir>] [--zshrc]
+Usage: ./install.sh --tenant <name|host> --region <aws-region> [--role <role-name>] [--dest <dir>] [--zshrc]
 
   --tenant   CyberArk tenant, e.g. "acme" or "acme.id.cyberark.cloud"
   --region   AWS region written to the profile, e.g. us-west-2
-  --role     IAM role name you will assume (not the ARN). The tool names the profile "<role>_profile".
+  --role     Optional. IAM role name you will assume (not the ARN); the tool names the profile "<role>_profile".
+             It is only the default profile awslogin verifies and exports. Omit it and set AWSLOGIN_ROLE_ARN
+             (or AWSLOGIN_PROFILE) instead; with neither, awslogin skips the check and does not set AWS_PROFILE.
   --dest     Install directory (default: ~/.local/share/cyberark-aws-cli)
   --zshrc    Append a `source` line for awslogin to ~/.zshrc (otherwise the line is only printed)
 
@@ -47,8 +50,9 @@ while [ $# -gt 0 ]; do
   esac
 done
 
-[ -n "$TENANT" ] && [ -n "$REGION" ] && [ -n "$ROLE" ] || { usage >&2; die "--tenant, --region and --role are required"; }
+[ -n "$TENANT" ] && [ -n "$REGION" ] || { usage >&2; die "--tenant and --region are required"; }
 for v in "$TENANT" "$REGION" "$ROLE"; do
+  [ -z "$v" ] && continue
   [[ "$v" =~ ^[A-Za-z0-9._-]+$ ]] || die "invalid value '$v' (allowed: letters, digits, '.', '_', '-')"
 done
 case "$DEST" in *'|'*|*'&'*|*'\'*) die "--dest must not contain '|', '&' or '\\'" ;; esac
@@ -61,7 +65,7 @@ for cmd in python3 unzip patch sed; do
 done
 python3 -c 'import venv' 2>/dev/null || die "python3 venv module is missing"
 command -v aws >/dev/null || echo "warning: AWS CLI ('aws') not found; install it, awslogin uses it to verify credentials" >&2
-[ -f "$ZIP" ] && [ -f "$PATCH_FILE" ] && [ -f "$SAMLAPP_PATCH" ] && [ -f "$LOGGING_PATCH" ] && [ -f "$AUTH_STATE_PATCH" ] && [ -f "$SAMLAPP_BOUNDS_PATCH" ] && [ -f "$MFA_POLL_PATCH" ] && [ -f "$NOTICES_PATCH" ] && [ -f "$TEMPLATE" ] || die "run from the repo checkout (zip, patches/ and awslogin.zsh must exist)"
+[ -f "$ZIP" ] && [ -f "$PATCH_FILE" ] && [ -f "$SAMLAPP_PATCH" ] && [ -f "$LOGGING_PATCH" ] && [ -f "$AUTH_STATE_PATCH" ] && [ -f "$SAMLAPP_BOUNDS_PATCH" ] && [ -f "$MFA_POLL_PATCH" ] && [ -f "$ONEPASS_PATCH" ] && [ -f "$NOTICES_PATCH" ] && [ -f "$TEMPLATE" ] || die "run from the repo checkout (zip, patches/ and awslogin.zsh must exist)"
 
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
@@ -78,6 +82,7 @@ patch -p1 -s -d "$DEST" < "$LOGGING_PATCH"
 patch -p1 -s -d "$DEST" < "$AUTH_STATE_PATCH"
 patch -p1 -s -d "$DEST" < "$SAMLAPP_BOUNDS_PATCH"
 patch -p1 -s -d "$DEST" < "$MFA_POLL_PATCH"
+patch -p1 -s -d "$DEST" < "$ONEPASS_PATCH"
 patch -p1 -s -d "$DEST" < "$NOTICES_PATCH"
 
 echo "==> Creating virtualenv and installing dependencies"
@@ -87,7 +92,7 @@ echo "==> Creating virtualenv and installing dependencies"
 
 echo "==> Writing $DEST/awslogin.zsh"
 sed -e '1d' \
-    -e "s|<role-name>|$ROLE|g" \
+    -e "s|<default-profile>|${ROLE:+${ROLE}_profile}|g" \
     -e "s|<region>|$REGION|g" \
     -e "s|<tenant>.id.cyberark.cloud|$HOST|g" \
     -e "s|\$HOME/.local/share/cyberark-aws-cli|$DEST|g" \
@@ -110,5 +115,5 @@ cat <<EOF
 
 Done. In a new zsh shell (or after sourcing the file) run:  awslogin
 It prompts for username, password and MFA (pick Mobile Authenticator, tap the number it prints).
-Profile: ${ROLE}_profile   Region: $REGION   Tenant: $HOST
+Profile: ${ROLE:+${ROLE}_profile}${ROLE:-(from AWSLOGIN_ROLE_ARN or AWSLOGIN_PROFILE)}   Region: $REGION   Tenant: $HOST
 EOF
